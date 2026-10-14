@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <!-- Configuración del documento -->
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Memorama personalizable</title>
+
+    <style>
+        /* Variables de colores */
+        :root {
+            --bg: #e9f1ee;
+            --ink: #1f2a44;
+            --card: #ffffff;
+            --back: #c2185b;
+            --back2: #e0457b;
+            --gold: #f2a900;
+            --ok: #1b8a5a;
+            --muted: #5b6679;
+            box-sizing: border-box;
+            padding-top: env(safe-area-inset-top, 0px);
+            padding-bottom: env(safe-area-inset-bottom, 0px);
+        }
+
+        /* Tema oscuro automático */
+        @media (prefers-color-scheme: dark) {
+            :root:not([data-theme="light"]) {
+                --bg: #131820;
+                --ink: #eef1f6;
+                --card: #222b38;
+                --back: #d81b60;
+                --back2: #8e1243;
+                --ok: #4cc38a;
+                --muted: #9aa5b8;
+                color-scheme: dark;
+            }
+        }
+
+        /* Tema oscuro manual */
+        :root[data-theme="dark"] {
+            --bg: #131820;
+            --ink: #eef1f6;
+            --card: #222b38;
+            --back: #d81b60;
+            --back2: #8e1243;
+            --ok: #4cc38a;
+            --muted: #9aa5b8;
+            color-scheme: dark;
+        }
+
+        /* Modelo de caja uniforme */
+        *, *::before, *::after { box-sizing: inherit; }
+        html, body { margin: 0; }
+        html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+
+        /* Diseño general */
+        body {
+            background: var(--bg);
+            color: var(--ink);
+            font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+            min-height: 100vh;
+            padding: 20px 16px 40px;
+        }
+
+        main { max-width: 640px; margin: 0 auto; }
+        h1 { font-family: Georgia, "Times New Roman", serif; font-size: 2.4rem; margin: 0 0 4px; letter-spacing: -0.02em; }
+        p.sub { margin: 0 0 18px; color: var(--muted); }
+        button { font: inherit; color: inherit; cursor: pointer; }
+
+        /* Barra de controles */
+        .bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+        .levels { display: flex; flex-wrap: wrap; gap: 6px; }
+        .lvl, .reset { border: 2px solid var(--ink); background: transparent; border-radius: 999px; padding: 6px 14px; font-weight: 600; }
+        .lvl[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+        .reset { background: var(--gold); border-color: var(--gold); color: #1f2a44; }
+
+        /* Estadísticas */
+        .stats { display: flex; flex-wrap: wrap; gap: 18px; font-variant-numeric: tabular-nums; margin-bottom: 16px; }
+        .stats b { font-size: 1.3rem; display: block; }
+        .stats span { font-size: 0.85rem; color: var(--muted); }
+
+        /* Tablero de tarjetas */
+        .grid { display: grid; gap: 10px; grid-template-columns: repeat(var(--cols, 4), minmax(0, 1fr)); }
+        .card { aspect-ratio: 3 / 4; padding: 0; border: 0; background: none; perspective: 700px; min-width: 0; }
+        .inner { position: relative; display: block; width: 100%; height: 100%; transform-style: preserve-3d; transition: transform 0.45s; }
+        .card.flipped .inner { transform: rotateY(180deg); }
+        .face { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 12px; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+        .back { background: repeating-conic-gradient(var(--back) 0 25%, var(--back2) 0 50%) 0 0 / 22px 22px; border: 3px solid var(--gold); }
+        .front { background: var(--card); transform: rotateY(180deg); border: 3px solid var(--ink); }
+        .front img { display: block; width: 100%; height: 100%; object-fit: contain; padding: 5px; }
+        .card.matched .front { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 18%, var(--card)); }
+        .card:focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; border-radius: 12px; }
+
+        /* Mensaje de victoria */
+        .win { display: none; margin-top: 18px; padding: 16px; border-radius: 12px; border: 3px solid var(--ok); text-align: center; }
+        .win.show { display: block; }
+        .win h2 { margin: 0 0 6px; font-family: Georgia, serif; }
+
+        /* Ajustes para pantallas pequeñas */
+        @media (max-width: 400px) {
+            .grid { gap: 6px; }
+            .front img { padding: 2px; }
+        }
+
+        /* Respeta las preferencias de movimiento */
+        @media (prefers-reduced-motion: reduce) {
+            .inner { transition: none; }
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <!-- Encabezado -->
+        <h1>Memorama</h1>
+        <p class="sub">Encuentra todas las parejas con los menos intentos posibles.</p>
+
+        <!-- Controles del juego -->
+        <div class="bar">
+            <div class="levels" id="levels"></div>
+            <button class="reset" id="reset">Reiniciar</button>
+        </div>
+
+        <!-- Estadísticas de la partida -->
+        <div class="stats">
+            <div><b id="moves">0</b><span>Intentos</span></div>
+            <div><b id="time">0:00</b><span>Tiempo</span></div>
+            <div><b id="best">–</b><span>Mejor</span></div>
+        </div>
+
+        <!-- Tablero de tarjetas -->
+        <div class="grid" id="grid" aria-label="Tablero del memorama"></div>
+
+        <!-- Mensaje al terminar -->
+        <div class="win" id="win" role="status">
+            <h2>¡Ganaste!</h2>
+            <p id="winMsg"></p>
+            <button class="reset" id="again">Jugar otra vez</button>
+        </div>
+    </main>
+
+    <script>
+        /* ==================================================
+           IMÁGENES PERSONALIZABLES
+           Cada imagen genera dos tarjetas para formar una pareja.
+           Usa rutas locales o direcciones de imágenes en internet.
+           ================================================== */
+
+        const IMAGES = [
+            { name: "Taco", src: "imagenes/taco.jpg" },
+            { name: "Aguacate", src: "imagenes/aguacate.jpg" },
+            { name: "Girasol", src: "imagenes/girasol.jpg" },
+            { name: "Guitarra", src: "imagenes/guitarra.jpg" },
+            { name: "Sandía", src: "imagenes/sandia.jpg" },
+            { name: "Cactus", src: "imagenes/cactus.jpg" },
+            { name: "Chile", src: "imagenes/chile.jpg" },
+            { name: "Maíz", src: "imagenes/maiz.jpg" }
+        ];
+
+        /* Configura los niveles indicando el número de parejas */
+        const LEVELS = [
+            { name: "Fácil", pairs: 4 },
+            { name: "Medio", pairs: 6 },
+            { name: "Difícil", pairs: 8 }
+        ];
+
+        /* Referencias a los elementos HTML */
+        const $ = id => document.getElementById(id);
+        const grid = $("grid");
+        const levelsContainer = $("levels");
+
+        /* Variables que controlan el estado de la partida */
+        let pairs = 0, first = null, lock = false, moves = 0, matched = 0, seconds = 0, timer = null, mismatchTimeout = null;
+
+        /* Convierte los segundos al formato minutos:segundos */
+        function fmt(s) { return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); }
+
+        /* Mezcla aleatoriamente los elementos de una lista */
+        function shuffle(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+            return array;
+        }
+
+        /* Calcula las columnas según la cantidad de tarjetas */
+        function getColumns(count) { return count <= 12 ? 4 : count <= 20 ? 5 : 6; }
+
+        /* Recupera el récord del nivel actual */
+        function getBest() {
+            try {
+                const saved = localStorage.getItem("memorama-best-" + pairs);
+                return saved ? JSON.parse(saved) : null;
+            } catch (error) { return null; }
+        }
+
+        /* Guarda el récord en el navegador */
+        function saveBest(result) {
+            try { localStorage.setItem("memorama-best-" + pairs, JSON.stringify(result)); } catch (error) {}
+        }
+
+        /* Muestra el mejor resultado del nivel seleccionado */
+        function showBest() {
+            const best = getBest();
+            $("best").textContent = best ? best.moves + " / " + fmt(best.time) : "–";
+        }
+
+        /* Detiene el cronómetro */
+        function stopTimer() { clearInterval(timer); timer = null; }
+
+        /* Inicia el cronómetro cuando se descubre la primera tarjeta */
+        function startTimer() {
+            if (timer !== null) return;
+            timer = setInterval(() => { seconds++; $("time").textContent = fmt(seconds); }, 1000);
+        }
+
+        /* Crea los botones de dificultad disponibles según las imágenes */
+        function createLevels() {
+            levelsContainer.innerHTML = "";
+            const available = LEVELS.filter(level => level.pairs <= IMAGES.length);
+            if (available.length === 0) {
+                grid.innerHTML = "<p>Agrega imágenes en la sección IMAGES para comenzar.</p>";
+                return;
+            }
+            available.forEach((level, index) => {
+                const button = document.createElement("button");
+                button.className = "lvl";
+                button.dataset.pairs = level.pairs;
+                button.textContent = level.name;
+                button.setAttribute("aria-pressed", "false");
+                button.addEventListener("click", () => {
+                    pairs = level.pairs;
+                    updateSelectedLevel(button);
+                    newGame();
+                });
+                levelsContainer.appendChild(button);
+                if ((level.name === "Medio" || index === 0) && !levelsContainer.querySelector('[aria-pressed="true"]')) {
+                    pairs = level.pairs;
+                    button.setAttribute("aria-pressed", "true");
+                }
+            });
+        }
+
+        /* Actualiza el botón que indica el nivel seleccionado */
+        function updateSelectedLevel(selected) {
+            document.querySelectorAll(".lvl").forEach(button => button.setAttribute("aria-pressed", String(button === selected)));
+        }
+
+        /* Crea una tarjeta con su imagen y su evento de clic */
+        function createCard(image) {
+            const button = document.createElement("button");
+            button.className = "card";
+            button.dataset.name = image.name;
+            button.setAttribute("aria-label", "Carta oculta");
+            button.setAttribute("aria-pressed", "false");
+
+            const inner = document.createElement("span");
+            inner.className = "inner";
+
+            const back = document.createElement("span");
+            back.className = "face back";
+            back.setAttribute("aria-hidden", "true");
+
+            const front = document.createElement("span");
+            front.className = "face front";
+
+            const img = document.createElement("img");
+            img.src = image.src;
+            img.alt = image.name;
+            img.draggable = false;
+            img.addEventListener("error", () => {
+                console.error("No se pudo cargar la imagen:", image.src);
+                img.alt = "Imagen no disponible";
+            });
+
+            front.appendChild(img);
+            inner.appendChild(back);
+            inner.appendChild(front);
+            button.appendChild(inner);
+            button.addEventListener("click", () => flip(button));
+            return button;
+        }
+
+        /* Reinicia las variables, mezcla las imágenes y crea el tablero */
+        function newGame() {
+            stopTimer();
+            clearTimeout(mismatchTimeout);
+            mismatchTimeout = null;
+            first = null;
+            lock = false;
+            moves = 0;
+            matched = 0;
+            seconds = 0;
+            $("moves").textContent = "0";
+            $("time").textContent = "0:00";
+            $("win").classList.remove("show");
+
+            if (pairs < 1 || pairs > IMAGES.length) {
+                grid.innerHTML = "<p>No hay suficientes imágenes para este nivel.</p>";
+                return;
+            }
+
+            const selected = shuffle([...IMAGES]).slice(0, pairs);
+            const deck = shuffle([...selected, ...selected]);
+            grid.style.setProperty("--cols", getColumns(deck.length));
+            grid.innerHTML = "";
+            deck.forEach(image => grid.appendChild(createCard(image)));
+            showBest();
+        }
+
+        /* Voltea una tarjeta y actualiza su etiqueta accesible */
+        function setFlipped(card, on) {
+            card.classList.toggle("flipped", on);
+            card.setAttribute("aria-label", on ? "Carta " + card.dataset.name : "Carta oculta");
+            card.setAttribute("aria-pressed", String(on));
+        }
+
+        /* Comprueba las tarjetas seleccionadas y determina si forman pareja */
+        function flip(card) {
+            if (lock || card.classList.contains("flipped") || card.classList.contains("matched")) return;
+            startTimer();
+            setFlipped(card, true);
+            if (first === null) {
+                first = card;
+                return;
+            }
+
+            moves++;
+            $("moves").textContent = moves;
+            const firstCard = first, secondCard = card;
+            first = null;
+
+            if (firstCard.dataset.name === secondCard.dataset.name) {
+                firstCard.classList.add("matched");
+                secondCard.classList.add("matched");
+                matched++;
+                if (matched === pairs) win();
+            } else {
+                lock = true;
+                mismatchTimeout = setTimeout(() => {
+                    setFlipped(firstCard, false);
+                    setFlipped(secondCard, false);
+                    lock = false;
+                    mismatchTimeout = null;
+                }, 800);
+            }
+        }
+
+        /* Finaliza la partida, comprueba el récord y muestra el resultado */
+        function win() {
+            stopTimer();
+            const best = getBest();
+            const record = !best || moves < best.moves || (moves === best.moves && seconds < best.time);
+            if (record) {
+                saveBest({ moves, time: seconds });
+                showBest();
+            }
+            $("winMsg").textContent = "Lo lograste en " + moves + " intentos y " + fmt(seconds) + "." + (record ? " ¡Nuevo récord!" : "");
+            $("win").classList.add("show");
+        }
+
+        /* Conecta los botones para reiniciar o volver a jugar */
+        $("reset").addEventListener("click", newGame);
+        $("again").addEventListener("click", newGame);
+
+        /* Inicia el juego si existen imágenes disponibles */
+        if (IMAGES.length === 0) {
+            grid.innerHTML = "<p>Agrega tus imágenes en la sección IMAGES para comenzar.</p>";
+        } else {
+            createLevels();
+            newGame();
+        }
+    </script>
+</body>
+</html>
+```
